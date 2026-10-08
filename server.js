@@ -78,6 +78,8 @@ app.post('/api/auth-request', async (req, res) => {
         applicationUserId: APPLICATION_USER_ID,
         institutionId: INSTITUTION_ID,
         callback: CALLBACK_URL
+        //Explicitly set type to AIS since you are doing account authorization 
+        type: "ACCOUNT_AUTHORISATION"
       })
     });
     const data = await response.json();
