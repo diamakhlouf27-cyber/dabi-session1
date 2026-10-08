@@ -23,44 +23,31 @@ const getAuthHeader = () => {
 // --- FRONTEND ROUTE ---
 app.get('/', (req, res) => {
   res.send(`
-    <!DOCTYPE html>
     <html>
-    <head>
-      <title>DABI Lab 3 - Open Banking AIS</title>
-      <style>
-        body { font-family: Arial, sans-serif; margin: 40px; background: #f4f4f9; color: #333; }
-        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 20px; }
-        button { background: #007bff; color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; }
-        button:hover { background: #0056b3; }
-        pre { background: #eee; padding: 10px; border-radius: 4px; overflow-x: auto; }
-      </style>
-    </head>
-    <body>
-      <h1>DABI Lab 3: Open Banking AIS</h1>
-      
-      <div class="card">
-        <h3>Step 1: Start Bank Consent</h3>
-        <p>Click below to initialize account authorization with <b>modelo-sandbox</b>.</p>
-        <button onclick="startConsent()">Authorize Bank Access</button>
-      </div>
-
-      <div class="card" id="results-card" style="display:none;">
-        <h3>Step 2: Accounts & Consent Duration</h3>
-        <pre id="output">Loading data...</pre>
-      </div>
-
-      <script>
-        async function startConsent() {
-          const res = await fetch('/api/auth-request', { method: 'POST' });
-          const data = await res.json();
-          if (data.authorisationUrl) {
-            window.location.href = data.authorisationUrl;
-          } else {
-            alert('Error starting consent: ' + JSON.stringify(data));
-          }
-        }
-      </script>
-    </body>
+      <head><title>DABI Lab - Yapily</title></head>
+      <body style="font-family: Arial; text-align: center; margin-top: 50px;">
+        <h1>Yapily Open Banking Integration</h1>
+        <button id="auth-btn" style="padding: 10px 20px; font-size: 16px; background-color: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer;">
+          Authorize Bank Access
+        </button>
+        <script>
+          document.getElementById('auth-btn').addEventListener('click', async () => {
+            try {
+              const response = await fetch('/api/auth-request', { method: 'POST' });
+              const data = await response.json();
+              const authUrl = data.data?.url || data.url;
+              if (authUrl) {
+                window.location.href = authUrl;
+              } else {
+                alert("Could not get authorization URL. Check console.");
+                console.log(data);
+              }
+            } catch (err) {
+              console.error("Error:", err);
+            }
+          });
+        </script>
+      </body>
     </html>
   `);
 });
