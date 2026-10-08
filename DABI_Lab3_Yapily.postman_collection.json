@@ -1,0 +1,520 @@
+{
+  "info": {
+    "_postman_id": "dabi-lab3-yapily-collection",
+    "name": "DABI Lab 3 — Yapily Open Banking sandbox",
+    "description": "Call a real Open Banking aggregator (Yapily) against the **Modelo Sandbox** — the UK Open Banking Implementation Entity mock bank.\n\nYou are the **TPP**. Yapily is the pipe. Modelo is the bank. The customer authenticates **at the bank**, never here.\n\nDocs: https://docs.yapily.com/getting-started/overview\nGet started: https://docs.yapily.com/getting-started/get-started\nAccount-data tutorial: https://docs.yapily.com/data/tutorial-account-and-trans-data\n\n## Before class\n\n1. Create a free account at https://console.yapily.com/\n2. Applications → Create Application → download Application ID (`applicationUuid`) and Secret (`secret`). The secret is shown **once**.\n3. Connected Institutions → Add Institutions → search `modelo-sandbox` → Register → **Yes, Preconfigured Credentials**.\n4. Import this collection **and** `DABI_Lab3_Yapily.postman_environment.json`.\n5. Select environment **DABI Lab 3 — Yapily sandbox**. Paste Application ID and Secret into `applicationId` / `applicationSecret`.\n\n## Lab path (~40 minutes)\n\nA1 Get institutions → B1 Create account authorisation → open `authorisationUrl` in a browser → log in `mits` / `mits` → copy `consentToken` → B5 Get accounts → B9 Get transactions → F1 call accounts with **no** consent (expect 401/403).\n\nOptional: folder C (PISP payment) and D (Hosted Pages).\n\n## Auth model (page 13–15)\n\n- Every request: HTTP **Basic** (Application ID + Secret). That is *your* TPP identity.\n- Data and payments: extra `consent` header. That is *the customer's* authorisation. Basic Auth without consent is not enough — that is the whole Open Banking security model.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "basic",
+    "basic": [
+      { "key": "username", "value": "{{applicationId}}", "type": "string" },
+      { "key": "password", "value": "{{applicationSecret}}", "type": "string" }
+    ]
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "https://api.yapily.com" }
+  ],
+  "item": [
+    {
+      "name": "A. Setup — you are the TPP",
+      "description": "No customer consent yet. These calls only prove your Application ID/Secret work and that `modelo-sandbox` is registered on your app.",
+      "item": [
+        {
+          "name": "A0 Unauthorized (no credentials)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/institutions",
+            "description": "Expect **401**. Full authentication is required. This is Basic Auth failing — not a missing consent."
+          }
+        },
+        {
+          "name": "A1 Get institutions",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 and a data array', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.data).to.be.an('array');",
+                  "});",
+                  "const body = pm.response.json();",
+                  "if (body && body.data) {",
+                  "  const modelo = body.data.find(i => i.id === 'modelo-sandbox') || body.data[0];",
+                  "  if (modelo && modelo.id) {",
+                  "    pm.environment.set('institutionId', modelo.id);",
+                  "    console.log('institutionId =', modelo.id);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/institutions",
+            "description": "Lists banks registered on **your** application.\n\nLook for `id: modelo-sandbox`, `environmentType: SANDBOX`, and features `ACCOUNTS` / `ACCOUNT_TRANSACTIONS`.\n\nEmpty list → you did not add Modelo under Connected Institutions.\n401 → Application ID/Secret missing or wrong.\n\nSaves `institutionId` when Modelo is present."
+          }
+        },
+        {
+          "name": "A2 Get institution modelo-sandbox",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/institutions/{{institutionId}}",
+            "description": "One bank. Confirm `INITIATE_ACCOUNT_REQUEST` and `CREATE_DOMESTIC_SINGLE_PAYMENT` if you will do folder C."
+          }
+        },
+        {
+          "name": "A3 Create user (optional)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"applicationUserId\": \"{{applicationUserId}}\"\n}"
+            },
+            "url": "{{baseUrl}}/users",
+            "description": "Optional. B1 will create the user if it does not exist. 409 means `dabi-lab3` already exists — that is fine."
+          }
+        },
+        {
+          "name": "A4 List users",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/users?filter[applicationUserId]={{applicationUserId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["users"],
+              "query": [
+                {
+                  "key": "filter[applicationUserId]",
+                  "value": "{{applicationUserId}}"
+                }
+              ]
+            },
+            "description": "Users are PSU records inside your Yapily app — not bank customers yet."
+          }
+        }
+      ]
+    },
+    {
+      "name": "B. AISP — consent then read accounts",
+      "description": "Account Information Service Provider flow (page 14).\n\n1. POST /account-auth-requests → copy `authorisationUrl`.\n2. Open it in a browser. Log in to Modelo as `mits` / `mits`. Approve.\n3. You land on https://auth.yapily.com/ (this application's registered redirect). Copy `consent` from the URL bar into `consentToken`, **or** run B3.\n4. GET /accounts with header `consent`.\n\nSCA happens at the **bank**. Yapily never sees `mits` / `mits`.",
+      "item": [
+        {
+          "name": "B1 Create account authorisation",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Authorisation created', function () {",
+                  "  pm.expect(pm.response.code).to.be.oneOf([200, 201]);",
+                  "});",
+                  "const body = pm.response.json();",
+                  "const data = body.data || {};",
+                  "if (data.authorisationUrl) {",
+                  "  pm.environment.set('authorisationUrl', data.authorisationUrl);",
+                  "  console.log('Open this URL in a browser:\\n' + data.authorisationUrl);",
+                  "}",
+                  "if (data.id) {",
+                  "  pm.environment.set('consentId', data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"applicationUserId\": \"{{applicationUserId}}\",\n  \"institutionId\": \"{{institutionId}}\",\n  \"callback\": \"{{callbackUrl}}\"\n}"
+            },
+            "url": "{{baseUrl}}/account-auth-requests",
+            "description": "Starts AIS consent. Status should be `AWAITING_AUTHORIZATION`.\n\n**Next:** Visualize tab or the Postman console for `authorisationUrl`. Paste it into a browser.\n\nModelo login: username `mits`, password `mits`.\n\nCallback must match the URL registered on the application (here `https://auth.yapily.com/`). After SCA, copy `consent` from the address bar into `consentToken`."
+          }
+        },
+        {
+          "name": "B2 Open authorisationUrl (manual)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{authorisationUrl}}",
+            "description": "Do **not** Send from Postman if the URL is a bank login page — open it in Chrome/Safari instead.\n\nAfter login (`mits` / `mits`) you return to https://auth.yapily.com/. Paste `consent` from the query string into `consentToken`.\n\nIf the URL is empty, run B1 first."
+          }
+        },
+        {
+          "name": "B3 List consents",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "const rows = body.data || [];",
+                  "const authorised = rows.find(c => c.status === 'AUTHORIZED' && c.consentToken);",
+                  "const pick = authorised || rows[0];",
+                  "if (pick) {",
+                  "  if (pick.id) pm.environment.set('consentId', pick.id);",
+                  "  if (pick.consentToken) pm.environment.set('consentToken', pick.consentToken);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/consents?filter[applicationUserId]={{applicationUserId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["consents"],
+              "query": [
+                {
+                  "key": "filter[applicationUserId]",
+                  "value": "{{applicationUserId}}"
+                }
+              ]
+            },
+            "description": "After the browser step, this is the other way to recover `consentToken`.\n\nLook for `status: AUTHORIZED`. The test script copies an authorised token into `consentToken`."
+          }
+        },
+        {
+          "name": "B4 Get one consent",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/consents/{{consentId}}",
+            "description": "Inspect `featureScope` (what the customer allowed) and `status`. AIS consent lasts up to 90 days; payment consent is single-use."
+          }
+        },
+        {
+          "name": "B5 Get accounts (AISP)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 with accounts', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().data).to.be.an('array');",
+                  "});",
+                  "const body = pm.response.json();",
+                  "if (body.data && body.data[0] && body.data[0].id) {",
+                  "  pm.environment.set('accountId', body.data[0].id);",
+                  "  console.log('accountId =', body.data[0].id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "consent", "value": "{{consentToken}}" }
+            ],
+            "url": "{{baseUrl}}/accounts",
+            "description": "The regulated AISP call. Basic Auth says who the TPP is. The `consent` header says the customer allowed this TPP to **read**.\n\nYapily normalises every bank into `data[]` with `id`, `currency`, `accountType`, `accountBalances`.\n\nCompare this envelope to the UK Open Banking `Data` / `Links` / `Meta` shape on page 15 — same idea, Yapily's wrapper.\n\nSaves `accountId` from the first account (Modelo example: `700004000000000000000007`)."
+          }
+        },
+        {
+          "name": "B6 Get identity",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "consent", "value": "{{consentToken}}" }
+            ],
+            "url": "{{baseUrl}}/identity",
+            "description": "Who the bank thinks the PSU is. Feature `IDENTITY`. Modelo returns Mitsuhirato / mits@suntori.com."
+          }
+        },
+        {
+          "name": "B7 Get one account",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "consent", "value": "{{consentToken}}" }
+            ],
+            "url": "{{baseUrl}}/accounts/{{accountId}}",
+            "description": "Fill `accountId` from B5 if the test script did not."
+          }
+        },
+        {
+          "name": "B8 Get balances",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "consent", "value": "{{consentToken}}" }
+            ],
+            "url": "{{baseUrl}}/accounts/{{accountId}}/balances",
+            "description": "Session 2: booked vs available often appear as different `type` values on `accountBalances`. Note which types Modelo returns."
+          }
+        },
+        {
+          "name": "B9 Get transactions",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "consent", "value": "{{consentToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/{{accountId}}/transactions?limit=20&sort=-date",
+              "host": ["{{baseUrl}}"],
+              "path": ["accounts", "{{accountId}}", "transactions"],
+              "query": [
+                { "key": "limit", "value": "20" },
+                { "key": "sort", "value": "-date" },
+                { "key": "from", "value": "", "disabled": true },
+                { "key": "before", "value": "", "disabled": true },
+                { "key": "offset", "value": "", "disabled": true }
+              ]
+            },
+            "description": "Paginated. Yapily default cap is 1000. `meta.pagination` and `links.self` tell you how to page.\n\nEnable `from` / `before` (ISO-8601) if you want a window."
+          }
+        }
+      ]
+    },
+    {
+      "name": "C. PISP — pay (optional)",
+      "description": "Payment Initiation Service Provider flow. Payment consent is **single-use**. You cannot reuse the AIS `consentToken` from folder B — that is the AISP vs PISP exam question.\n\nPayee sort code / account number are Yapily's documented sandbox example (`123456` / `12345678`), not a real beneficiary.\n\nModelo login again: `mits` / `mits`.",
+      "item": [
+        {
+          "name": "C1 Create payment authorisation",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('paymentIdempotencyId')) {",
+                  "  pm.environment.set('paymentIdempotencyId', ('dabi-' + Date.now().toString(36)).slice(0, 35));",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Payment authorisation created', function () {",
+                  "  pm.expect(pm.response.code).to.be.oneOf([200, 201]);",
+                  "});",
+                  "const data = (pm.response.json().data) || {};",
+                  "if (data.authorisationUrl) {",
+                  "  pm.environment.set('paymentAuthorisationUrl', data.authorisationUrl);",
+                  "  console.log('Open payment authorisationUrl:\\n' + data.authorisationUrl);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"applicationUserId\": \"{{applicationUserId}}\",\n  \"institutionId\": \"{{institutionId}}\",\n  \"callback\": \"{{callbackUrl}}\",\n  \"paymentRequest\": {\n    \"type\": \"DOMESTIC_PAYMENT\",\n    \"reference\": \"DABI Lab 3\",\n    \"paymentIdempotencyId\": \"{{paymentIdempotencyId}}\",\n    \"amount\": {\n      \"amount\": 8.70,\n      \"currency\": \"GBP\"\n    },\n    \"payee\": {\n      \"name\": \"BILLS COFFEE LTD\",\n      \"accountIdentifications\": [\n        { \"type\": \"ACCOUNT_NUMBER\", \"identification\": \"12345678\" },\n        { \"type\": \"SORT_CODE\", \"identification\": \"123456\" }\n      ]\n    }\n  }\n}"
+            },
+            "url": "{{baseUrl}}/payment-auth-requests",
+            "description": "The `paymentRequest` is shown to the customer at the bank. After SCA, copy the **payment** `consentToken` into `paymentConsentToken` (do not overwrite the AIS token).\n\n`paymentIdempotencyId` max 35 characters. Generated on first run if empty.\n\nOpen `paymentAuthorisationUrl` in a browser."
+          }
+        },
+        {
+          "name": "C2 Create payment",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "const data = body.data || {};",
+                  "if (data.id) pm.environment.set('paymentId', data.id);",
+                  "pm.test('Payment accepted or pending', function () {",
+                  "  pm.expect(pm.response.code).to.be.oneOf([200, 201]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "consent", "value": "{{paymentConsentToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"DOMESTIC_PAYMENT\",\n  \"reference\": \"DABI Lab 3\",\n  \"paymentIdempotencyId\": \"{{paymentIdempotencyId}}\",\n  \"amount\": {\n    \"amount\": 8.70,\n    \"currency\": \"GBP\"\n  },\n  \"payee\": {\n    \"name\": \"BILLS COFFEE LTD\",\n    \"accountIdentifications\": [\n      { \"type\": \"ACCOUNT_NUMBER\", \"identification\": \"12345678\" },\n      { \"type\": \"SORT_CODE\", \"identification\": \"123456\" }\n    ]\n  }\n}"
+            },
+            "url": "{{baseUrl}}/payments",
+            "description": "Body must match C1. Header is the **payment** consent, not the AIS token.\n\nSandbox payments may go `COMPLETED` immediately, or stay `PENDING`. That is sandbox quality, not a bug in your request."
+          }
+        },
+        {
+          "name": "C3 Get payment",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "consent", "value": "{{paymentConsentToken}}" }
+            ],
+            "url": "{{baseUrl}}/payments/{{paymentId}}",
+            "description": "Poll status. In production Yapily prefers webhooks over polling (rate limits)."
+          }
+        },
+        {
+          "name": "C4 AIS consent on a payment (should fail)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "consent", "value": "{{consentToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"DOMESTIC_PAYMENT\",\n  \"reference\": \"DABI Lab 3\",\n  \"paymentIdempotencyId\": \"should-fail\",\n  \"amount\": {\n    \"amount\": 1.00,\n    \"currency\": \"GBP\"\n  },\n  \"payee\": {\n    \"name\": \"BILLS COFFEE LTD\",\n    \"accountIdentifications\": [\n      { \"type\": \"ACCOUNT_NUMBER\", \"identification\": \"12345678\" },\n      { \"type\": \"SORT_CODE\", \"identification\": \"123456\" }\n    ]\n  }\n}"
+            },
+            "url": "{{baseUrl}}/payments",
+            "description": "Uses the **AISP** token from folder B. Expect **403**. Read consent cannot initiate a payment. That is AISP vs PISP."
+          }
+        }
+      ]
+    },
+    {
+      "name": "D. Hosted Pages (optional)",
+      "description": "Yapily-hosted bank picker + SCA. Faster to demo; less control. Hosted Pages may be gated on the account (Beta) — a 403 here is not a lab fail.\n\nDocs: https://docs.yapily.com/tools-and-services/hosted-pages/payment-tutorial-hosted-data",
+      "item": [
+        {
+          "name": "D1 Create hosted consent request",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = (pm.response.json().data) || {};",
+                  "if (data.consentRequestId) pm.environment.set('hostedConsentRequestId', data.consentRequestId);",
+                  "if (data.hostedUrl) {",
+                  "  pm.environment.set('hostedUrl', data.hostedUrl);",
+                  "  console.log('Open hostedUrl:\\n' + data.hostedUrl);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json;charset=UTF-8" },
+              { "key": "Content-Type", "value": "application/json;charset=UTF-8" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"redirectUrl\": \"{{callbackUrl}}\",\n  \"institutionIdentifiers\": {\n    \"institutionCountryCode\": \"GB\",\n    \"institutionId\": \"{{institutionId}}\"\n  },\n  \"applicationUserId\": \"{{applicationUserId}}\",\n  \"userSettings\": {\n    \"language\": \"EN\",\n    \"location\": \"GB\"\n  }\n}"
+            },
+            "url": "{{baseUrl}}/hosted/consent-requests",
+            "description": "Open `hostedUrl` in a browser. Setting `institutionId` skips the bank picker and goes straight to Modelo."
+          }
+        },
+        {
+          "name": "D2 Get hosted consent request",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = (pm.response.json().data) || {};",
+                  "if (data.consentToken) pm.environment.set('consentToken', data.consentToken);",
+                  "if (data.consentId) pm.environment.set('consentId', data.consentId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Accept", "value": "application/json;charset=UTF-8" }
+            ],
+            "url": "{{baseUrl}}/hosted/consent-requests/{{hostedConsentRequestId}}",
+            "description": "After the hosted flow, status should be `AUTHORIZED` and `consentToken` is in the body. Then run B5."
+          }
+        }
+      ]
+    },
+    {
+      "name": "F. Break it on purpose",
+      "description": "Same discipline as Lab 4: save the error body, not just the status.",
+      "item": [
+        {
+          "name": "F1 Accounts with no consent header",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/accounts",
+            "description": "Basic Auth only. Expect **400/401/403**. The TPP is authenticated; the **customer** is not. Record the exact status and `error.message`."
+          }
+        },
+        {
+          "name": "F2 Accounts with a junk consent",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "consent", "value": "not-a-real-token" }
+            ],
+            "url": "{{baseUrl}}/accounts",
+            "description": "Compare with F1. Wrong token vs missing token — two different failures."
+          }
+        },
+        {
+          "name": "F3 Wrong Basic Auth",
+          "request": {
+            "auth": {
+              "type": "basic",
+              "basic": [
+                { "key": "username", "value": "wrong-id", "type": "string" },
+                { "key": "password", "value": "wrong-secret", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/institutions",
+            "description": "Expect **401**. This is your Application Secret, not the customer's password."
+          }
+        }
+      ]
+    }
+  ]
+}
