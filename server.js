@@ -51,8 +51,6 @@ app.get('/', (req, res) => {
     </html>
   `);
 });
-
-// --- BACKEND API: Create Account Authorisation ---
 app.post('/api/auth-request', async (req, res) => {
   try {
     const response = await fetch(`${BASE_URL}/account-auth-requests`, {
