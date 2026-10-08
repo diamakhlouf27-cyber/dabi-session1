@@ -87,12 +87,7 @@ app.post('/api/auth-request', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-    const data = await response.json();
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+   
 
 // --- CALLBACK ROUTE (Handles return from bank) ---
 app.get('/callback/consent', async (req, res) => {
