@@ -10,7 +10,7 @@ app.use(express.urlencoded({ extended: true }));
 const BASE_URL = process.env.BASE_URL || 'https://api.yapily.com';
 const APPLICATION_ID = process.env.APPLICATION_ID;
 const APPLICATION_SECRET = process.env.APPLICATION_SECRET;
-const CALLBACK_URL = process.env.CALLBACK_URL || 'https://dabi-session1.onrender.com/callback/consent';
+const CALLBACK_URL = process.env.CALLBACK_URL || 'https://dabi-session1-cosv.onrender.com/callback/consent';
 const APPLICATION_USER_ID = process.env.APPLICATION_USER_ID || 'dabi-lab3';
 const INSTITUTION_ID = 'modelo-sandbox';
 
