@@ -35,17 +35,18 @@ app.get('/', (req, res) => {
             try {
               const response = await fetch('/api/auth-request', { method: 'POST' });
               const data = await response.json();
-              console.log("Full Yapily Response:", data);
               
+              // Check all possible locations for the link
               const authUrl = data.data?.authorisationUrl || data.data?.url || data.authorizationUrl || data.url;
               
               if (authUrl) {
                 window.location.href = authUrl;
               } else {
-                alert("Could not get authorization URL. Check console for details.");
+                // This will pop up the exact JSON response on your screen
+                alert("Response: " + JSON.stringify(data, null, 2));
               }
             } catch (err) {
-              console.error("Error:", err);
+              alert("Error: " + err.message);
             }
           });
         </script>
